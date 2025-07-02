@@ -1,10 +1,8 @@
-// File: src/pages/Chat.jsx
+// ==== frontend/src/pages/Chat.jsx ====
 import { useEffect, useRef, useState } from "react";
 import { useUser } from "../hooks/useUser";
 import { io } from "socket.io-client";
 
-// const socket = io("http://localhost:3001");
-// const socket = io("https://your-backend.onrender.com");
 const socket = io("https://dilse-backend-rzmj.onrender.com");
 
 const Chat = () => {
@@ -12,8 +10,7 @@ const Chat = () => {
   const [partner, setPartner] = useState(null);
   const [messages, setMessages] = useState([]);
   const [msg, setMsg] = useState("");
-  const [isMuted, setIsMuted] = useState(false);
-  const [cameraOn, setCameraOn] = useState(true);
+  const [isPartnerTyping, setIsPartnerTyping] = useState(false);
   const [callStarted, setCallStarted] = useState(false);
 
   const localVideoRef = useRef(null);
@@ -29,6 +26,25 @@ const Chat = () => {
 
     socket.on("paired", ({ name }) => {
       setPartner(name);
+    });
+
+    socket.on("chatHistory", (history) => {
+      setMessages(history);
+    });
+
+    socket.on("message", (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+
+    socket.on("partnerTyping", () => setIsPartnerTyping(true));
+    socket.on("partnerStopTyping", () => setIsPartnerTyping(false));
+
+    socket.on("partnerLeft", () => {
+      alert("Your partner left. Searching again...");
+      cleanupMedia();
+      setPartner(null);
+      setMessages([]);
+      setTimeout(() => socket.emit("register", user), 500);
     });
 
     socket.on("offer", async (offer) => {
@@ -52,28 +68,24 @@ const Chat = () => {
       }
     });
 
-    socket.on("chatHistory", (history) => {
-      setMessages(history);
-    });
-
-    socket.on("message", (msg) => {
-      setMessages((prev) => [...prev, msg]);
-    });
-
     return () => {
       socket.disconnect();
-      peerConnectionRef.current?.close();
-      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cleanupMedia();
     };
   }, [user]);
 
   const startLocalStream = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
-    localStreamRef.current = stream;
-    localVideoRef.current.srcObject = stream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+    } catch (err) {
+      alert("Failed to access camera or microphone");
+      console.error(err);
+    }
   };
 
   const createPeer = () => {
@@ -90,8 +102,10 @@ const Chat = () => {
       if (e.candidate) socket.emit("ice", e.candidate);
     };
 
-    peer.ontrack = (e) => {
-      remoteVideoRef.current.srcObject = e.streams[0];
+    peer.ontrack = (event) => {
+      console.log("✅ Got remote track", event.streams[0]);
+      if (remoteVideoRef.current)
+        remoteVideoRef.current.srcObject = event.streams[0];
     };
 
     return peer;
@@ -107,35 +121,15 @@ const Chat = () => {
     setCallStarted(true);
   };
 
-  const toggleMute = () => {
-    const audioTrack = localStreamRef.current?.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.enabled = !audioTrack.enabled;
-      setIsMuted(!audioTrack.enabled);
-    }
-  };
-
-  const toggleCamera = () => {
-    const videoTrack = localStreamRef.current?.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.enabled = !videoTrack.enabled;
-      setCameraOn(videoTrack.enabled);
-    }
-  };
-
-  const endCall = () => {
+  const cleanupMedia = () => {
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localVideoRef.current.srcObject = null;
-    remoteVideoRef.current.srcObject = null;
-    setPartner(null);
-    setCallStarted(false);
-    alert("Call ended");
-  };
 
-  const reconnect = () => {
-    window.location.reload();
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current = null;
+
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
   };
 
   const sendMessage = () => {
@@ -162,6 +156,7 @@ const Chat = () => {
             ref={localVideoRef}
             autoPlay
             muted
+            playsInline
             className="w-64 h-48 rounded bg-black"
           />
         </div>
@@ -170,43 +165,18 @@ const Chat = () => {
           <video
             ref={remoteVideoRef}
             autoPlay
+            playsInline
             className="w-64 h-48 rounded bg-black"
           />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <button
-          onClick={startCall}
-          className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
-        >
-          📞 Start Call
-        </button>
-        <button
-          onClick={toggleMute}
-          className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600"
-        >
-          {isMuted ? "Unmute" : "Mute"}
-        </button>
-        <button
-          onClick={toggleCamera}
-          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-        >
-          {cameraOn ? "Turn Camera Off" : "Turn Camera On"}
-        </button>
-        <button
-          onClick={endCall}
-          className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-        >
-          ❌ End Call
-        </button>
-        <button
-          onClick={reconnect}
-          className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-        >
-          🔄 Reconnect
-        </button>
-      </div>
+      <button
+        onClick={startCall}
+        className="mb-4 bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600"
+      >
+        📞 Start Call
+      </button>
 
       <div className="flex flex-col border w-full max-w-xl h-64 overflow-y-scroll mb-4 p-4 rounded shadow">
         {messages.map((m, i) => (
@@ -216,19 +186,33 @@ const Chat = () => {
               m.from === user.name ? "text-right" : "text-left"
             }`}
           >
-            <span className="block text-sm text-gray-500">{m.from}</span>
+            <span className="block text-xs text-gray-400">{m.from}</span>
             <span className="inline-block bg-pink-100 px-3 py-1 rounded-md text-gray-800">
               {m.text}
             </span>
           </div>
         ))}
+        {isPartnerTyping && (
+          <div className="text-xs text-gray-400 italic">
+            Partner is typing...
+          </div>
+        )}
       </div>
 
       <div className="flex w-full max-w-xl">
         <input
           type="text"
           value={msg}
-          onChange={(e) => setMsg(e.target.value)}
+          onChange={(e) => {
+            setMsg(e.target.value);
+            socket.emit("typing");
+            clearTimeout(window.typingTimeout);
+            window.typingTimeout = setTimeout(
+              () => socket.emit("stopTyping"),
+              1000
+            );
+          }}
+          onBlur={() => socket.emit("stopTyping")}
           className="flex-1 border px-4 py-2 rounded-l"
           placeholder="Type a message..."
         />
@@ -236,7 +220,7 @@ const Chat = () => {
           onClick={sendMessage}
           className="bg-pink-500 text-white px-4 py-2 rounded-r hover:bg-pink-600"
         >
-          Send
+          Send 💌
         </button>
       </div>
     </div>
