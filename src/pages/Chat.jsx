@@ -4,7 +4,8 @@ import { useUser } from "../hooks/useUser";
 import { io } from "socket.io-client";
 
 // const socket = io("http://localhost:3001");
-const socket = io("https://your-backend.onrender.com");
+// const socket = io("https://your-backend.onrender.com");
+const socket = io("https://dilse-backend-rzmj.onrender.com");
 
 const Chat = () => {
   const { user } = useUser();
